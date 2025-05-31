@@ -1,2 +1,6 @@
 # snak
-Work-in-progress Battlesnake
+My silly little JS snake.
+
+Work in progress, probably not very good.
+
+
