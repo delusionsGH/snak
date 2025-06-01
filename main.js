@@ -139,7 +139,7 @@ function calculateInterceptionMove(myHead, targetHead, board, you) {
 function calculateMove(board, you) {
     const myHead = you.head;
     const myBody = you.body;
-    const food = board.food;
+    const food = board.food || [];
     const width = board.width;
     const height = board.height;
 
@@ -555,14 +555,12 @@ function calculateMove(board, you) {
 
         const head = snake.head;
         grid[board.height - 1 - head.y][head.x] = isYou ? "🟦" : "🟨";
-    }
-
-    for (const food of board.food) {
-        grid[board.height - 1 - food.y][food.x] = "🟥";
-    }
-
-    for (const pos of path) {
-        if (!board.food.some((f) => f.x === pos.x && f.y === pos.y)) {
+    }    if (board.food) {
+        for (const food of board.food) {
+            grid[board.height - 1 - food.y][food.x] = "🟥";
+        }
+    }    for (const pos of path) {
+        if (!board.food || !board.food.some((f) => f.x === pos.x && f.y === pos.y)) {
             grid[board.height - 1 - pos.y][pos.x] = "🟩";
         }
     }
@@ -621,8 +619,8 @@ function floodFill(start, blockedSet, board, snakeBody, depth = 0) {
     return visited.size;
 }
 
-function isMoveSafe(board, you, nextHead) {
-    const willEatFood = board.food.some((f) =>
+function isMoveSafe(move, board, you, nextHead) {
+    const willEatFood = board.food && board.food.some((f) =>
         f.x === nextHead.x && f.y === nextHead.y
     );
     const simulatedBody = willEatFood ? [...you.body] : you.body.slice(0, -1);
