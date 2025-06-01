@@ -823,7 +823,18 @@ function minimaxEval(board, you, myHead, myBody) {
         const dist = Math.abs(myHead.x - snake.head.x) + Math.abs(myHead.y - snake.head.y);
         if (dist < minDistToEnemy) minDistToEnemy = dist;
     }
-    return availableSpace * 10 + minDistToEnemy;
+
+    const minDim = Math.min(board.width, board.height);
+    let wallPenalty = 0;
+    if (minDim <= 12) {
+        const distToLeft = myHead.x;
+        const distToRight = board.width - 1 - myHead.x;
+        const distToBottom = myHead.y;
+        const distToTop = board.height - 1 - myHead.y;
+        const minWallDist = Math.min(distToLeft, distToRight, distToBottom, distToTop);
+        wallPenalty = (7 - minDim + 1) * (3 - minWallDist) * 10;
+    }
+    return availableSpace * 10 + minDistToEnemy - wallPenalty;
 }
 
 function getNextHeadMinimax(myHead, move) {
