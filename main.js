@@ -526,8 +526,76 @@ function calculateMove(board, you) {
                 else if (next.y < myHead.y) move = "down";
                 else if (next.x < myHead.x) move = "left";
                 else if (next.x > myHead.x) move = "right";
-
                 if (move) {
+                    let avoidMove = false;
+                    for (const snake of board.snakes) {
+                        if (snake.id === you.id) continue;
+                        if (snake.body.length > 1) {
+                            const head = snake.head;
+                            const neck = snake.body[1];
+                            let snakeDir = null;
+                            if (head.x === neck.x) {
+                                snakeDir = head.y > neck.y ? "up" : "down";
+                            } else if (head.y === neck.y) {
+                                snakeDir = head.x > neck.x ? "right" : "left";
+                            }
+                            if (snakeDir === move) {
+                                avoidMove = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (avoidMove) {
+                        const foodMoves = ["up", "down", "left", "right"].filter(m => m !== move);
+                        let safeAlt = null;
+                        for (const altMove of foodMoves) {
+                            const altNextHead = getNextHead(altMove);
+                            let altAvoid = false;
+                            for (const snake of board.snakes) {
+                                if (snake.id === you.id) continue;
+                                if (snake.body.length > 1) {
+                                    const head = snake.head;
+                                    const neck = snake.body[1];
+                                    let snakeDir = null;
+                                    if (head.x === neck.x) {
+                                        snakeDir = head.y > neck.y ? "up" : "down";
+                                    } else if (head.y === neck.y) {
+                                        snakeDir = head.x > neck.x ? "right" : "left";
+                                    }
+                                    if (snakeDir === altMove) {
+                                        altAvoid = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            if (!altAvoid && isSafe(altMove, altNextHead) && !isImmediateSelfCollision(altMove)) {
+                                safeAlt = altMove;
+                                break;
+                            }
+                        }
+                        if (safeAlt) {
+                            logGameState(
+                                "A*-AvoidBait",
+                                safeAlt,
+                                {
+                                    to: `(${next.x},${next.y})`,
+                                    pathLen: path.length,
+                                    eat: food.some(f => f.x === getNextHead(safeAlt).x && f.y === getNextHead(safeAlt).y) ? "yes" : "no"
+                                }
+                            );
+                            return safeAlt;
+                        }
+                        logGameState(
+                            "A*-Baited",
+                            move,
+                            {
+                                to: `(${next.x},${next.y})`,
+                                pathLen: path.length,
+                                eat: food.some(f => f.x === next.x && f.y === next.y) ? "yes" : "no"
+                            }
+                        );
+                        return move;
+                    }
                     const nextHead = getNextHead(move);
                     const willEatFood = food.some((f) =>
                         f.x === nextHead.x && f.y === nextHead.y
