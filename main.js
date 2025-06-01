@@ -424,58 +424,85 @@ function calculateMove(board, you) {
         }
     }
     if (closestFood) {
-        const path = aStarPath(myHead, closestFood);
-        if (path && path.length > 1) {
-            const next = path[1];
-            let move = null;
-            if (next.y > myHead.y) move = "up";
-            else if (next.y < myHead.y) move = "down";
-            else if (next.x < myHead.x) move = "left";
-            else if (next.x > myHead.x) move = "right";
 
-            if (move) {
-                const nextHead = getNextHead(move);
-                const willEatFood = food.some((f) =>
-                    f.x === nextHead.x && f.y === nextHead.y
-                );
-                let foodIsTrap = false;
-                if (willEatFood) {
+        let enemyGoingForFood = null;
+        let enemyWillReachFirst = false;
+        let enemyIsLonger = false;
+        for (const snake of board.snakes) {
+            if (snake.id === you.id) continue;
 
-                    const simulatedBody = [nextHead, ...myBody];
-                    const blocked = new Set();
-                    for (const snake of board.snakes) {
-                        for (const segment of snake.body) {
-                            blocked.add(`${segment.x},${segment.y}`);
+            const enemyHead = snake.head;
+            const enemyDist = Math.abs(enemyHead.x - closestFood.x) + Math.abs(enemyHead.y - closestFood.y);
+            const myDist = Math.abs(myHead.x - closestFood.x) + Math.abs(myHead.y - closestFood.y);
+            if (enemyDist <= myDist) {
+
+                enemyGoingForFood = snake;
+                if (enemyDist < myDist) enemyWillReachFirst = true;
+                if (snake.length >= you.length) enemyIsLonger = true;
+            }
+        }
+
+        if (enemyGoingForFood && (enemyIsLonger || enemyWillReachFirst)) {
+            Deno.stdout.writeSync(new TextEncoder().encode(
+                `[food contest] nuh uh, not going to (${closestFood.x},${closestFood.y}), i'm too short right now\n`
+            ));
+        } else {
+            const path = aStarPath(myHead, closestFood);
+            if (path && path.length > 1) {
+                const next = path[1];
+                let move = null;
+                if (next.y > myHead.y) move = "up";
+                else if (next.y < myHead.y) move = "down";
+                else if (next.x < myHead.x) move = "left";
+                else if (next.x > myHead.x) move = "right";
+
+                if (move) {
+                    const nextHead = getNextHead(move);
+                    const willEatFood = food.some((f) =>
+                        f.x === nextHead.x && f.y === nextHead.y
+                    );
+                    let foodIsTrap = false;
+                    if (willEatFood) {
+
+                        const simulatedBody = [nextHead, ...myBody];
+                        const blocked = new Set();
+                        for (const snake of board.snakes) {
+                            for (const segment of snake.body) {
+                                blocked.add(`${segment.x},${segment.y}`);
+                            }
+                        }
+
+                        if (myBody.length > 1) {
+                            const myTail = myBody[myBody.length - 1];
+                            blocked.delete(`${myTail.x},${myTail.y}`);
+                        }
+                        const availableSpace = floodFill(nextHead, blocked, board, simulatedBody);
+                        const minSafe = myBody.length;
+                        Deno.stdout.writeSync(new TextEncoder().encode(
+                            `[food trap debug] availableSpace=${availableSpace}, minSafe=${minSafe} after eating at (${nextHead.x},${nextHead.y})\n`
+                        ));
+                        if (availableSpace < minSafe) {
+                            foodIsTrap = true;
                         }
                     }
-
-                    if (myBody.length > 1) {
-                        const myTail = myBody[myBody.length - 1];
-                        blocked.delete(`${myTail.x},${myTail.y}`);
+                    if (
+                        isSafe(move, nextHead) &&
+                        !isImmediateSelfCollision(move) &&
+                        isMoveSafe(move, board, you, nextHead) &&
+                        !foodIsTrap
+                    ) {
+                        Deno.stdout.writeSync(new TextEncoder().encode(
+                            `[smart(er) logic | a* best move] ${move} to ${
+                                willEatFood ? "eat" : "move"
+                            } at (${next.x},${next.y})\n` +
+                                `Path length: ${path.length}\n`,
+                        ));
+                        return move;
+                    } else if (foodIsTrap) {
+                        Deno.stdout.writeSync(new TextEncoder().encode(
+                            `[food trap prevention] skipping food at (${next.x},${next.y}), too little space after eating\n`
+                        ));
                     }
-                    const availableSpace = floodFill(nextHead, blocked, board, simulatedBody);
-                    const minSafe = Math.max(myBody.length, Math.floor(board.width * board.height / 6));
-                    if (availableSpace < minSafe) {
-                        foodIsTrap = true;
-                    }
-                }
-                if (
-                    isSafe(move, nextHead) &&
-                    !isImmediateSelfCollision(move) &&
-                    isMoveSafe(move, board, you, nextHead) &&
-                    !foodIsTrap
-                ) {
-                    Deno.stdout.writeSync(new TextEncoder().encode(
-                        `[smart(er) logic | a* best move] ${move} to ${
-                            willEatFood ? "eat" : "move"
-                        } at (${next.x},${next.y})\n` +
-                            `Path length: ${path.length}\n`,
-                    ));
-                    return move;
-                } else if (foodIsTrap) {
-                    Deno.stdout.writeSync(new TextEncoder().encode(
-                        `[food trap prevention] skipping food at (${next.x},${next.y}), too little space after eating\n`
-                    ));
                 }
             }
         }
