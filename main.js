@@ -757,7 +757,6 @@ function findEscapeRoutes(board, you, position, blockedPositions) {
     return escapeRoutes;
 }
 
-// --- Minimax/AlphaBeta implementation ---
 function minimaxAlphaBeta(board, you, myHead, myBody, depth, maximizing, alpha, beta) {
     const moves = ["up", "down", "left", "right"];
     let bestMove = null;
@@ -811,7 +810,6 @@ function minimaxRecursive(board, you, myHead, myBody, depth, maximizing, alpha, 
 }
 
 function minimaxEval(board, you, myHead, myBody) {
-    // Simple evaluation: maximize available space, penalize proximity to other snake heads
     const blocked = new Set();
     for (const snake of board.snakes) {
         for (const segment of snake.body) {
