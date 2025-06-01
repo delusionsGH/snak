@@ -173,11 +173,8 @@ function calculateMove(board, you) {
 
         if (
             board.hazards &&
-            board.hazards.some((h) =>
-                h.x === nextHead.x && h.y === nextHead.y
-            )
+            board.hazards.some((h) => h.x === nextHead.x && h.y === nextHead.y)
         ) {
-
             if (you.health <= 15) {
                 return false;
             }
@@ -277,14 +274,13 @@ function calculateMove(board, you) {
     function logGameState(action, move, extra = {}) {
         const info = [
             "---------------------------",
-            `Turn: ${board.turn ?? "?"}`,
             `Snakes: ${board.snakes.length}`,
             `You: ${you.name} (id: ${you.id})`,
             `Health: ${you.health}`,
             `Length: ${you.length}`,
             `Head: (${you.head.x},${you.head.y})`,
             `Action: ${action}${move ? ` (${move})` : ""}`,
-            ...Object.entries(extra).map(([k, v]) => `${k}: ${v}`)
+            ...Object.entries(extra).map(([k, v]) => `${k}: ${v}`),
         ].join("\n");
         Deno.stdout.writeSync(new TextEncoder().encode(info + "\n"));
     }
@@ -310,7 +306,7 @@ function calculateMove(board, you) {
                         logGameState(
                             "Intercept",
                             intercept.move,
-                            { target: `(${target.head.x},${target.head.y})` }
+                            { target: `(${target.head.x},${target.head.y})` },
                         );
                         return intercept.move;
                     }
@@ -442,12 +438,48 @@ function calculateMove(board, you) {
                 logGameState(
                     "Trap",
                     trapMove,
-                    { target: `(${snake.head.x},${snake.head.y})`, snakeId: snake.id }
+                    {
+                        target: `(${snake.head.x},${snake.head.y})`,
+                        snakeId: snake.id,
+                    },
                 );
                 return trapMove;
             }
         }
     }
+
+    for (const snake of board.snakes) {
+        if (snake.id === you.id) continue;
+        const dx = Math.abs(myHead.x - snake.head.x);
+        const dy = Math.abs(myHead.y - snake.head.y);
+        if (dx + dy === 1 && you.length >= snake.length) {
+            let interceptMove = null;
+            if (myHead.x < snake.head.x) interceptMove = "right";
+            else if (myHead.x > snake.head.x) interceptMove = "left";
+            else if (myHead.y < snake.head.y) interceptMove = "up";
+            else if (myHead.y > snake.head.y) interceptMove = "down";
+            if (interceptMove) {
+                const nextHead = getNextHead(interceptMove);
+                if (
+                    isSafe(interceptMove, nextHead) &&
+                    !isImmediateSelfCollision(interceptMove) &&
+                    !wouldTrapInOwnLoop(you, nextHead, board)
+                ) {
+                    logGameState(
+                        "Intercept-HeadOn",
+                        interceptMove,
+                        {
+                            target: `(${snake.head.x},${snake.head.y})`,
+                            snakeId: snake.id,
+                            winHeadOn: true
+                        }
+                    );
+                    return interceptMove;
+                }
+            }
+        }
+    }
+
     let closestFood = null;
     let closestDist = Infinity;
     for (const f of food) {
@@ -461,7 +493,9 @@ function calculateMove(board, you) {
         function isFoodInStarvationLoop(foodPos, board, you) {
             const simulatedHead = { x: foodPos.x, y: foodPos.y };
             const simulatedBody = [simulatedHead, ...you.body];
-            const blocked = new Set(simulatedBody.map(seg => `${seg.x},${seg.y}`));
+            const blocked = new Set(
+                simulatedBody.map((seg) => `${seg.x},${seg.y}`),
+            );
             for (let x = -1; x <= board.width; x++) {
                 blocked.add(`${x},-1`);
                 blocked.add(`${x},${board.height}`);
@@ -470,7 +504,7 @@ function calculateMove(board, you) {
                 blocked.add(`-1,${y}`);
                 blocked.add(`${board.width},${y}`);
             }
-            const otherFood = (board.food || []).filter(f =>
+            const otherFood = (board.food || []).filter((f) =>
                 f.x !== foodPos.x || f.y !== foodPos.y
             );
             if (otherFood.length === 0) return false;
@@ -487,12 +521,14 @@ function calculateMove(board, you) {
                         canReachAny = true;
                         break;
                     }
-                    for (const dir of [
-                        { x: 1, y: 0 },
-                        { x: -1, y: 0 },
-                        { x: 0, y: 1 },
-                        { x: 0, y: -1 }
-                    ]) {
+                    for (
+                        const dir of [
+                            { x: 1, y: 0 },
+                            { x: -1, y: 0 },
+                            { x: 0, y: 1 },
+                            { x: 0, y: -1 },
+                        ]
+                    ) {
                         const nx = pos.x + dir.x;
                         const ny = pos.y + dir.y;
                         const nkey = `${nx},${ny}`;
@@ -515,10 +551,30 @@ function calculateMove(board, you) {
             logGameState(
                 "SkipFood-StarveLoop",
                 null,
-                { food: `(${closestFood.x},${closestFood.y})` }
+                { food: `(${closestFood.x},${closestFood.y})` },
             );
         } else {
-            const path = aStarPath(myHead, closestFood);
+            let bestFood = null;
+            let bestScore = -Infinity;
+            for (const f of food) {
+                const myDist = Math.abs(myHead.x - f.x) + Math.abs(myHead.y - f.y);
+                let minEnemyDist = Infinity;
+                for (const snake of board.snakes) {
+                    if (snake.id === you.id) continue;
+                    const dist = Math.abs(snake.head.x - f.x) + Math.abs(snake.head.y - f.y);
+                    if (dist < minEnemyDist) minEnemyDist = dist;
+                }
+                let trapPenalty = 0;
+                if (isFoodInStarvationLoop(f, board, you)) trapPenalty = 1000;
+                let score = -myDist + Math.max(0, minEnemyDist - myDist) * 2 - trapPenalty;
+                if (you.health < 40) score += 10 - myDist;
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestFood = f;
+                }
+            }
+            const targetFood = bestFood || closestFood;
+            const path = aStarPath(myHead, targetFood);
             if (path && path.length > 1) {
                 const next = path[1];
                 let move = null;
@@ -528,6 +584,7 @@ function calculateMove(board, you) {
                 else if (next.x > myHead.x) move = "right";
                 if (move) {
                     let avoidMove = false;
+                    let baitedBy = null;
                     for (const snake of board.snakes) {
                         if (snake.id === you.id) continue;
                         if (snake.body.length > 1) {
@@ -540,16 +597,35 @@ function calculateMove(board, you) {
                                 snakeDir = head.x > neck.x ? "right" : "left";
                             }
                             if (snakeDir === move) {
-                                avoidMove = true;
-                                break;
+                                const snakeDist = Math.abs(head.x - targetFood.x) + Math.abs(head.y - targetFood.y);
+                                const myDist = Math.abs(myHead.x - targetFood.x) + Math.abs(myHead.y - targetFood.y);
+                                if (snakeDist <= myDist) {
+                                    avoidMove = true;
+                                    baitedBy = snake.id;
+                                    break;
+                                }
                             }
                         }
                     }
-                    if (avoidMove) {
+                    if (!calculateMove._prevPositions) calculateMove._prevPositions = [];
+                    const prevPositions = calculateMove._prevPositions;
+                    const nextHead = getNextHead(move);
+                    let isOscillating = false;
+                    if (prevPositions.length > 0) {
+                        const prev = prevPositions[prevPositions.length - 1];
+                        if (prev && prev.x === nextHead.x && prev.y === nextHead.y) {
+                            isOscillating = true;
+                        }
+                    }
+                    prevPositions.push({ x: myHead.x, y: myHead.y });
+                    if (prevPositions.length > 4) prevPositions.shift();
+                    if (avoidMove || isOscillating) {
                         const foodMoves = ["up", "down", "left", "right"].filter(m => m !== move);
                         let safeAlt = null;
+                        let bestAltScore = -Infinity;
                         for (const altMove of foodMoves) {
                             const altNextHead = getNextHead(altMove);
+                            const wasJustThere = prevPositions.some(p => p.x === altNextHead.x && p.y === altNextHead.y);
                             let altAvoid = false;
                             for (const snake of board.snakes) {
                                 if (snake.id === you.id) continue;
@@ -563,14 +639,21 @@ function calculateMove(board, you) {
                                         snakeDir = head.x > neck.x ? "right" : "left";
                                     }
                                     if (snakeDir === altMove) {
-                                        altAvoid = true;
-                                        break;
+                                        const snakeDist = Math.abs(head.x - targetFood.x) + Math.abs(head.y - targetFood.y);
+                                        const myDist = Math.abs(myHead.x - targetFood.x) + Math.abs(myHead.y - targetFood.y);
+                                        if (snakeDist <= myDist) {
+                                            altAvoid = true;
+                                            break;
+                                        }
                                     }
                                 }
                             }
-                            if (!altAvoid && isSafe(altMove, altNextHead) && !isImmediateSelfCollision(altMove)) {
+                            const distToFood = Math.abs(altNextHead.x - targetFood.x) + Math.abs(altNextHead.y - targetFood.y);
+                            const progress = (Math.abs(myHead.x - targetFood.x) + Math.abs(myHead.y - targetFood.y)) - distToFood;
+                            const isSafeAlt = !altAvoid && !wasJustThere && isSafe(altMove, altNextHead) && !isImmediateSelfCollision(altMove);
+                            if (isSafeAlt && progress > 0 && progress >= bestAltScore) {
                                 safeAlt = altMove;
-                                break;
+                                bestAltScore = progress;
                             }
                         }
                         if (safeAlt) {
@@ -578,31 +661,36 @@ function calculateMove(board, you) {
                                 "A*-AvoidBait",
                                 safeAlt,
                                 {
-                                    to: `(${next.x},${next.y})`,
+                                    to: `(${getNextHead(safeAlt).x},${getNextHead(safeAlt).y})`,
                                     pathLen: path.length,
-                                    eat: food.some(f => f.x === getNextHead(safeAlt).x && f.y === getNextHead(safeAlt).y) ? "yes" : "no"
+                                    eat: food.some(f => f.x === getNextHead(safeAlt).x && f.y === getNextHead(safeAlt).y) ? "yes" : "no",
+                                    direction: safeAlt,
+                                    baitedBy
                                 }
                             );
                             return safeAlt;
                         }
                         logGameState(
-                            "A*-Baited",
+                            "A*-BaitedOrLoop",
                             move,
                             {
                                 to: `(${next.x},${next.y})`,
                                 pathLen: path.length,
-                                eat: food.some(f => f.x === next.x && f.y === next.y) ? "yes" : "no"
+                                eat: food.some(f => f.x === next.x && f.y === next.y) ? "yes" : "no",
+                                direction: move,
+                                baitedBy,
+                                oscillating: isOscillating
                             }
                         );
                         return move;
                     }
-                    const nextHead = getNextHead(move);
+                    const nextHead2 = getNextHead(move);
                     const willEatFood = food.some((f) =>
                         f.x === nextHead.x && f.y === nextHead.y
                     );
                     let foodIsTrap = false;
                     if (willEatFood) {
-                        const simulatedBody = [nextHead, ...myBody];
+                        const simulatedBody = [nextHead2, ...myBody];
                         const blocked = new Set();
                         for (const snake of board.snakes) {
                             for (const segment of snake.body) {
@@ -613,16 +701,24 @@ function calculateMove(board, you) {
                             const myTail = myBody[myBody.length - 1];
                             blocked.delete(`${myTail.x},${myTail.y}`);
                         }
-                        const availableSpace = floodFill(nextHead, blocked, board, simulatedBody);
-                        const minSafe = Math.max(myBody.length, Math.floor(board.width * board.height / 6));
+                        const availableSpace = floodFill(
+                            nextHead2,
+                            blocked,
+                            board,
+                            simulatedBody,
+                        );
+                        const minSafe = Math.max(
+                            myBody.length,
+                            Math.floor(board.width * board.height / 6),
+                        );
                         if (availableSpace < minSafe) {
                             foodIsTrap = true;
                         }
                     }
                     if (
-                        isSafe(move, nextHead) &&
+                        isSafe(move, nextHead2) &&
                         !isImmediateSelfCollision(move) &&
-                        isMoveSafe(move, board, you, nextHead) &&
+                        isMoveSafe(move, board, you, nextHead2) &&
                         !foodIsTrap
                     ) {
                         logGameState(
@@ -631,15 +727,15 @@ function calculateMove(board, you) {
                             {
                                 to: `(${next.x},${next.y})`,
                                 pathLen: path.length,
-                                eat: willEatFood ? "yes" : "no"
-                            }
+                                eat: willEatFood ? "yes" : "no",
+                            },
                         );
                         return move;
                     } else if (foodIsTrap) {
                         logGameState(
                             "SkipFood-Trap",
                             null,
-                            { food: `(${next.x},${next.y})` }
+                            { food: `(${next.x},${next.y})` },
                         );
                     }
                 }
@@ -660,34 +756,36 @@ function calculateMove(board, you) {
         } else if (neck.x === myHead.x + 1 && neck.y === myHead.y) {
             availableMoves = availableMoves.filter((m) => m !== "right");
         }
-    }    const safeMoves = availableMoves.filter((move) => {
+    }
+    const safeMoves = availableMoves.filter((move) => {
         const nextHead = getNextHead(move);
         return isSafe(move, nextHead) && !isImmediateSelfCollision(move) &&
             !isNextTurnSelfCollision(move);
     });
 
-    const analyzedMoves = safeMoves.map(move => {
+    const analyzedMoves = safeMoves.map((move) => {
         const trapAnalysis = detectTrapAhead(board, you, move);
         return {
             move,
             ...trapAnalysis,
-            nextHead: getNextHead(move)
+            nextHead: getNextHead(move),
         };
     });
 
-    const safestMoves = analyzedMoves.filter(m => !m.isTrap);
+    const safestMoves = analyzedMoves.filter((m) => !m.isTrap);
     if (safestMoves.length > 0) {
-        const chosenMove = safestMoves[Math.floor(Math.random() * safestMoves.length)];
+        const chosenMove =
+            safestMoves[Math.floor(Math.random() * safestMoves.length)];
         logGameState(
             "SafeTrapFree",
             chosenMove.move,
-            { to: `(${chosenMove.nextHead.x},${chosenMove.nextHead.y})` }
+            { to: `(${chosenMove.nextHead.x},${chosenMove.nextHead.y})` },
         );
         return chosenMove.move;
     }
 
     const moveWithBestEscape = analyzedMoves
-        .filter(m => m.escapeRoutes.length > 0)
+        .filter((m) => m.escapeRoutes.length > 0)
         .sort((a, b) => b.escapeRoutes.length - a.escapeRoutes.length)[0];
 
     if (moveWithBestEscape) {
@@ -696,24 +794,26 @@ function calculateMove(board, you) {
             moveWithBestEscape.move,
             {
                 to: `(${moveWithBestEscape.nextHead.x},${moveWithBestEscape.nextHead.y})`,
-                escapeRoutes: moveWithBestEscape.escapeRoutes.length
-            }
+                escapeRoutes: moveWithBestEscape.escapeRoutes.length,
+            },
         );
         return moveWithBestEscape.move;
     }
 
     if (safeMoves.length > 0) {
-        const nonDoomMoves = analyzedMoves.filter(m => 
+        const nonDoomMoves = analyzedMoves.filter((m) =>
             !wouldTrapInOwnLoop(you, m.nextHead, board)
         );
-        const bestMoveSet = nonDoomMoves.length > 0 ? nonDoomMoves : analyzedMoves;
+        const bestMoveSet = nonDoomMoves.length > 0
+            ? nonDoomMoves
+            : analyzedMoves;
 
         const bestMove = bestMoveSet
             .sort((a, b) => b.availableSpace - a.availableSpace)[0];
         logGameState(
             "SafeMostSpace",
             bestMove.move,
-            { to: `(${bestMove.nextHead.x},${bestMove.nextHead.y})` }
+            { to: `(${bestMove.nextHead.x},${bestMove.nextHead.y})` },
         );
         return bestMove.move;
     }
@@ -725,12 +825,23 @@ function calculateMove(board, you) {
 
     if (lastResortMoves.length > 0) {
         if (safeMoves.length === 0 || safestMoves.length === 0) {
-            const minimaxMove = minimaxAlphaBeta(board, you, myHead, myBody, 3, true, -Infinity, Infinity);
+            const minimaxMove = minimaxAlphaBeta(
+                board,
+                you,
+                myHead,
+                myBody,
+                3,
+                true,
+                -Infinity,
+                Infinity,
+            );
             if (minimaxMove) {
                 logGameState(
                     "Minimax",
                     minimaxMove.move,
-                    { to: `(${minimaxMove.nextHead.x},${minimaxMove.nextHead.y})` }
+                    {
+                        to: `(${minimaxMove.nextHead.x},${minimaxMove.nextHead.y})`,
+                    },
                 );
                 return minimaxMove.move;
             }
@@ -739,7 +850,7 @@ function calculateMove(board, you) {
             lastResortMoves[Math.floor(Math.random() * lastResortMoves.length)];
         logGameState(
             "LastResort",
-            move
+            move,
         );
         return move;
     }
@@ -752,12 +863,12 @@ function calculateMove(board, you) {
         ) {
             logGameState(
                 "Momentum",
-                you.shout
+                you.shout,
             );
             return you.shout;
         }
     }
-    const fallbackMoves = ["up", "down", "left", "right"].filter(move => {
+    const fallbackMoves = ["up", "down", "left", "right"].filter((move) => {
         const nextHead = getNextHead(move);
         return isSafe(move, nextHead);
     });
@@ -766,7 +877,7 @@ function calculateMove(board, you) {
         : "down";
     logGameState(
         "Fallback",
-        move
+        move,
     );
     return move;
 }
@@ -857,9 +968,8 @@ function floodFill(start, blockedSet, board, snakeBody, depth = 0) {
 }
 
 function isMoveSafe(move, board, you, nextHead) {
-    const willEatFood = board.food && board.food.some((f) =>
-        f.x === nextHead.x && f.y === nextHead.y
-    );
+    const willEatFood = board.food &&
+        board.food.some((f) => f.x === nextHead.x && f.y === nextHead.y);
     const simulatedBody = willEatFood ? [...you.body] : you.body.slice(0, -1);
 
     const blocked = new Set();
@@ -891,8 +1001,8 @@ function detectTrapAhead(board, you, move) {
     const nextHead = getNextHead(move);
     const simulatedBody = [...you.body];
     simulatedBody[0] = nextHead;
-    
-    const otherSnakes = board.snakes.filter(s => s.id !== you.id);
+
+    const otherSnakes = board.snakes.filter((s) => s.id !== you.id);
     let potentialBlocks = new Set();
 
     for (const snake of otherSnakes) {
@@ -903,39 +1013,54 @@ function detectTrapAhead(board, you, move) {
 
     for (const snake of otherSnakes) {
         const possibleMoves = ["up", "down", "left", "right"]
-            .map(dir => {
+            .map((dir) => {
                 const pos = {
-                    x: snake.head.x + (dir === "left" ? -1 : dir === "right" ? 1 : 0),
-                    y: snake.head.y + (dir === "up" ? 1 : dir === "down" ? -1 : 0)
+                    x: snake.head.x +
+                        (dir === "left" ? -1 : dir === "right" ? 1 : 0),
+                    y: snake.head.y +
+                        (dir === "up" ? 1 : dir === "down" ? -1 : 0),
                 };
                 return pos;
             })
-            .filter(pos => 
+            .filter((pos) =>
                 pos.x >= 0 && pos.x < board.width &&
                 pos.y >= 0 && pos.y < board.height
             );
-        
+
         for (const pos of possibleMoves) {
             potentialBlocks.add(`${pos.x},${pos.y}`);
         }
     }
 
-    const availableSpace = floodFill(nextHead, potentialBlocks, board, simulatedBody);
-    const minSafeSpace = Math.min(you.length * 2, board.width * board.height / 4);
-    
+    const availableSpace = floodFill(
+        nextHead,
+        potentialBlocks,
+        board,
+        simulatedBody,
+    );
+    const minSafeSpace = Math.min(
+        you.length * 2,
+        board.width * board.height / 4,
+    );
+
     if (availableSpace < minSafeSpace) {
-        const escapeRoutes = findEscapeRoutes(board, you, nextHead, potentialBlocks);
+        const escapeRoutes = findEscapeRoutes(
+            board,
+            you,
+            nextHead,
+            potentialBlocks,
+        );
         return {
             isTrap: true,
             escapeRoutes,
-            availableSpace
+            availableSpace,
         };
     }
 
     return {
         isTrap: false,
         escapeRoutes: [],
-        availableSpace
+        availableSpace,
     };
 }
 
@@ -946,13 +1071,18 @@ function findEscapeRoutes(board, you, position, blockedPositions) {
     visited.add(`${position.x},${position.y}`);
 
     const isEscapePoint = (pos) => {
-        const spaceAvailable = floodFill(pos, blockedPositions, board, you.body);
+        const spaceAvailable = floodFill(
+            pos,
+            blockedPositions,
+            board,
+            you.body,
+        );
         return spaceAvailable >= you.length * 2;
     };
 
     while (queue.length > 0 && escapeRoutes.length < 3) {
         const current = queue.shift();
-        
+
         if (isEscapePoint(current.pos)) {
             escapeRoutes.push(current.path);
             continue;
@@ -962,7 +1092,7 @@ function findEscapeRoutes(board, you, position, blockedPositions) {
             { x: current.pos.x + 1, y: current.pos.y },
             { x: current.pos.x - 1, y: current.pos.y },
             { x: current.pos.x, y: current.pos.y + 1 },
-            { x: current.pos.x, y: current.pos.y - 1 }
+            { x: current.pos.x, y: current.pos.y - 1 },
         ];
 
         for (const neighbor of neighbors) {
@@ -976,7 +1106,7 @@ function findEscapeRoutes(board, you, position, blockedPositions) {
                 visited.add(key);
                 queue.push({
                     pos: neighbor,
-                    path: [...current.path, neighbor]
+                    path: [...current.path, neighbor],
                 });
             }
         }
@@ -985,18 +1115,39 @@ function findEscapeRoutes(board, you, position, blockedPositions) {
     return escapeRoutes;
 }
 
-function minimaxAlphaBeta(board, you, myHead, myBody, depth, maximizing, alpha, beta) {
+function minimaxAlphaBeta(
+    board,
+    you,
+    myHead,
+    myBody,
+    depth,
+    maximizing,
+    alpha,
+    beta,
+) {
     const moves = ["up", "down", "left", "right"];
     let bestMove = null;
     let bestValue = maximizing ? -Infinity : Infinity;
     for (const move of moves) {
         const nextHead = getNextHeadMinimax(myHead, move);
         if (!isSafeMinimax(move, nextHead, board, you, myBody)) continue;
-        const willEatFood = board.food && board.food.some((f) => f.x === nextHead.x && f.y === nextHead.y);
-        const simulatedBody = willEatFood ? [nextHead, ...myBody] : [nextHead, ...myBody.slice(0, -1)];
-        const value = minimaxRecursive(board, you, nextHead, simulatedBody, depth - 1, !maximizing, alpha, beta);
+        const willEatFood = board.food &&
+            board.food.some((f) => f.x === nextHead.x && f.y === nextHead.y);
+        const simulatedBody = willEatFood
+            ? [nextHead, ...myBody]
+            : [nextHead, ...myBody.slice(0, -1)];
+        const value = minimaxRecursive(
+            board,
+            you,
+            nextHead,
+            simulatedBody,
+            depth - 1,
+            !maximizing,
+            alpha,
+            beta,
+        );
         if (maximizing) {
-if (value > bestValue) {
+            if (value > bestValue) {
                 bestValue = value;
                 bestMove = { move, nextHead };
             }
@@ -1013,7 +1164,16 @@ if (value > bestValue) {
     return bestMove;
 }
 
-function minimaxRecursive(board, you, myHead, myBody, depth, maximizing, alpha, beta) {
+function minimaxRecursive(
+    board,
+    you,
+    myHead,
+    myBody,
+    depth,
+    maximizing,
+    alpha,
+    beta,
+) {
     if (depth === 0) {
         return minimaxEval(board, you, myHead, myBody);
     }
@@ -1022,9 +1182,21 @@ function minimaxRecursive(board, you, myHead, myBody, depth, maximizing, alpha, 
     for (const move of moves) {
         const nextHead = getNextHeadMinimax(myHead, move);
         if (!isSafeMinimax(move, nextHead, board, you, myBody)) continue;
-        const willEatFood = board.food && board.food.some((f) => f.x === nextHead.x && f.y === nextHead.y);
-        const simulatedBody = willEatFood ? [nextHead, ...myBody] : [nextHead, ...myBody.slice(0, -1)];
-        const value = minimaxRecursive(board, you, nextHead, simulatedBody, depth - 1, !maximizing, alpha, beta);
+        const willEatFood = board.food &&
+            board.food.some((f) => f.x === nextHead.x && f.y === nextHead.y);
+        const simulatedBody = willEatFood
+            ? [nextHead, ...myBody]
+            : [nextHead, ...myBody.slice(0, -1)];
+        const value = minimaxRecursive(
+            board,
+            you,
+            nextHead,
+            simulatedBody,
+            depth - 1,
+            !maximizing,
+            alpha,
+            beta,
+        );
         if (maximizing) {
             bestValue = Math.max(bestValue, value);
             alpha = Math.max(alpha, bestValue);
@@ -1048,7 +1220,8 @@ function minimaxEval(board, you, myHead, myBody) {
     let minDistToEnemy = Infinity;
     for (const snake of board.snakes) {
         if (snake.id === you.id) continue;
-        const dist = Math.abs(myHead.x - snake.head.x) + Math.abs(myHead.y - snake.head.y);
+        const dist = Math.abs(myHead.x - snake.head.x) +
+            Math.abs(myHead.y - snake.head.y);
 if (dist < minDistToEnemy) minDistToEnemy = dist;
     }
 
@@ -1059,7 +1232,12 @@ if (dist < minDistToEnemy) minDistToEnemy = dist;
         const distToRight = board.width - 1 - myHead.x;
         const distToBottom = myHead.y;
         const distToTop = board.height - 1 - myHead.y;
-        const minWallDist = Math.min(distToLeft, distToRight, distToBottom, distToTop);
+        const minWallDist = Math.min(
+            distToLeft,
+            distToRight,
+            distToBottom,
+            distToTop,
+        );
         wallPenalty = (7 - minDim + 1) * (3 - minWallDist) * 10;
     }
     return availableSpace * 10 + minDistToEnemy - wallPenalty;
@@ -1091,7 +1269,8 @@ function isSafeMinimax(move, nextHead, board, you, myBody) {
     ) {
         return false;
     }
-    const willEatFood = board.food && board.food.some((f) => f.x === nextHead.x && f.y === nextHead.y);
+    const willEatFood = board.food &&
+        board.food.some((f) => f.x === nextHead.x && f.y === nextHead.y);
     const simulatedBody = willEatFood ? myBody : myBody.slice(0, -1);
     if (
         simulatedBody.some((segment) =>
@@ -1113,31 +1292,35 @@ function isSafeMinimax(move, nextHead, board, you, myBody) {
     return true;
 }
 
-
 function wouldTrapInOwnLoop(you, nextHead, board) {
-    const willEatFood = board.food && board.food.some((f) =>
-        f.x === nextHead.x && f.y === nextHead.y
-    );
-    const simulatedBody = willEatFood ? [nextHead, ...you.body] : [nextHead, ...you.body.slice(0, -1)];
+    const willEatFood = board.food &&
+        board.food.some((f) => f.x === nextHead.x && f.y === nextHead.y);
+    const simulatedBody = willEatFood
+        ? [nextHead, ...you.body]
+        : [nextHead, ...you.body.slice(0, -1)];
     let surrounded = 0;
-    for (const dir of [
-        { x: 1, y: 0 },
-        { x: -1, y: 0 },
-        { x: 0, y: 1 },
-        { x: 0, y: -1 }
-    ]) {
+    for (
+        const dir of [
+            { x: 1, y: 0 },
+            { x: -1, y: 0 },
+            { x: 0, y: 1 },
+            { x: 0, y: -1 },
+        ]
+    ) {
         const nx = nextHead.x + dir.x;
         const ny = nextHead.y + dir.y;
         if (nx < 0 || nx >= board.width || ny < 0 || ny >= board.height) {
             surrounded++;
             continue;
         }
-        if (simulatedBody.slice(1).some(seg => seg.x === nx && seg.y === ny)) {
+        if (
+            simulatedBody.slice(1).some((seg) => seg.x === nx && seg.y === ny)
+        ) {
             surrounded++;
         }
     }
     if (surrounded === 4) return true;
-    const blocked = new Set(simulatedBody.map(seg => `${seg.x},${seg.y}`));
+    const blocked = new Set(simulatedBody.map((seg) => `${seg.x},${seg.y}`));
     for (let x = -1; x <= board.width; x++) {
         blocked.add(`${x},-1`);
         blocked.add(`${x},${board.height}`);
@@ -1155,12 +1338,14 @@ function canTrapSnake(snake, myHead, board, you) {
     if (snake.length > you.length) return false;
     const head = snake.head;
     let wallSides = 0;
-    for (const dir of [
-        { x: 1, y: 0 },
-        { x: -1, y: 0 },
-        { x: 0, y: 1 },
-        { x: 0, y: -1 }
-    ]) {
+    for (
+        const dir of [
+            { x: 1, y: 0 },
+            { x: -1, y: 0 },
+            { x: 0, y: 1 },
+            { x: 0, y: -1 },
+        ]
+    ) {
         const nx = head.x + dir.x;
         const ny = head.y + dir.y;
         if (nx < 0 || nx >= board.width || ny < 0 || ny >= board.height) {
@@ -1174,27 +1359,32 @@ function canTrapSnake(snake, myHead, board, you) {
                 y: myHead.y + (move === "up" ? 1 : move === "down" ? -1 : 0),
             };
             if (
-                Math.abs(myNext.x - head.x) + Math.abs(myNext.y - head.y) === 1 &&
+                Math.abs(myNext.x - head.x) + Math.abs(myNext.y - head.y) ===
+                    1 &&
                 myNext.x >= 0 && myNext.x < board.width &&
                 myNext.y >= 0 && myNext.y < board.height &&
-                !board.snakes.some(s =>
-                    s.body.some(seg => seg.x === myNext.x && seg.y === myNext.y)
+                !board.snakes.some((s) =>
+                    s.body.some((seg) =>
+                        seg.x === myNext.x && seg.y === myNext.y
+                    )
                 )
             ) {
                 let escapeCount = 0;
-                for (const dir of [
-                    { x: 1, y: 0 },
-                    { x: -1, y: 0 },
-                    { x: 0, y: 1 },
-                    { x: 0, y: -1 }
-                ]) {
+                for (
+                    const dir of [
+                        { x: 1, y: 0 },
+                        { x: -1, y: 0 },
+                        { x: 0, y: 1 },
+                        { x: 0, y: -1 },
+                    ]
+                ) {
                     const ex = head.x + dir.x;
                     const ey = head.y + dir.y;
                     if (
                         ex >= 0 && ex < board.width &&
                         ey >= 0 && ey < board.height &&
-                        !board.snakes.some(s =>
-                            s.body.some(seg => seg.x === ex && seg.y === ey)
+                        !board.snakes.some((s) =>
+                            s.body.some((seg) => seg.x === ex && seg.y === ey)
                         ) &&
                         !(ex === myNext.x && ey === myNext.y)
                     ) {
@@ -1221,27 +1411,32 @@ function canTrapSnake(snake, myHead, board, you) {
                 y: myHead.y + (move === "up" ? 1 : move === "down" ? -1 : 0),
             };
             if (
-                Math.abs(myNext.x - head.x) + Math.abs(myNext.y - head.y) === 1 &&
+                Math.abs(myNext.x - head.x) + Math.abs(myNext.y - head.y) ===
+                    1 &&
                 myNext.x >= 0 && myNext.x < board.width &&
                 myNext.y >= 0 && myNext.y < board.height &&
-                !board.snakes.some(s =>
-                    s.body.some(seg => seg.x === myNext.x && seg.y === myNext.y)
+                !board.snakes.some((s) =>
+                    s.body.some((seg) =>
+                        seg.x === myNext.x && seg.y === myNext.y
+                    )
                 )
             ) {
                 let exits = 0;
-                for (const dir of [
-                    { x: 1, y: 0 },
-                    { x: -1, y: 0 },
-                    { x: 0, y: 1 },
-                    { x: 0, y: -1 }
-                ]) {
+                for (
+                    const dir of [
+                        { x: 1, y: 0 },
+                        { x: -1, y: 0 },
+                        { x: 0, y: 1 },
+                        { x: 0, y: -1 },
+                    ]
+                ) {
                     const ex = head.x + dir.x;
                     const ey = head.y + dir.y;
                     if (
                         ex >= 0 && ex < board.width &&
                         ey >= 0 && ey < board.height &&
-                        !board.snakes.some(s =>
-                            s.body.some(seg => seg.x === ex && seg.y === ey)
+                        !board.snakes.some((s) =>
+                            s.body.some((seg) => seg.x === ex && seg.y === ey)
                         ) &&
                         !(ex === myNext.x && ey === myNext.y)
                     ) {
