@@ -438,21 +438,44 @@ function calculateMove(board, you) {
                 const willEatFood = food.some((f) =>
                     f.x === nextHead.x && f.y === nextHead.y
                 );
+                let foodIsTrap = false;
+                if (willEatFood) {
 
+                    const simulatedBody = [nextHead, ...myBody];
+                    const blocked = new Set();
+                    for (const snake of board.snakes) {
+                        for (const segment of snake.body) {
+                            blocked.add(`${segment.x},${segment.y}`);
+                        }
+                    }
+
+                    if (myBody.length > 1) {
+                        const myTail = myBody[myBody.length - 1];
+                        blocked.delete(`${myTail.x},${myTail.y}`);
+                    }
+                    const availableSpace = floodFill(nextHead, blocked, board, simulatedBody);
+                    const minSafe = Math.max(myBody.length, Math.floor(board.width * board.height / 6));
+                    if (availableSpace < minSafe) {
+                        foodIsTrap = true;
+                    }
+                }
                 if (
                     isSafe(move, nextHead) &&
                     !isImmediateSelfCollision(move) &&
-                    isMoveSafe(move, board, you, nextHead)
+                    isMoveSafe(move, board, you, nextHead) &&
+                    !foodIsTrap
                 ) {
-                    // const boardVisualization = visualizeBoard(board, you, path);
                     Deno.stdout.writeSync(new TextEncoder().encode(
                         `[smart(er) logic | a* best move] ${move} to ${
                             willEatFood ? "eat" : "move"
                         } at (${next.x},${next.y})\n` +
-                            // `Path length: ${path.length}\n${boardVisualization}\n`,
                             `Path length: ${path.length}\n`,
                     ));
                     return move;
+                } else if (foodIsTrap) {
+                    Deno.stdout.writeSync(new TextEncoder().encode(
+                        `[food trap prevention] skipping food at (${next.x},${next.y}), too little space after eating\n`
+                    ));
                 }
             }
         }
@@ -502,7 +525,7 @@ function calculateMove(board, you) {
     if (moveWithBestEscape) {
         Deno.stdout.writeSync(new TextEncoder().encode(
             `[standard logic | escaping trap] ${moveWithBestEscape.move} to (${moveWithBestEscape.nextHead.x},${moveWithBestEscape.nextHead.y})\n` +
-            `Escape routes available: ${moveWithBestEscape.escapeRoutes.length}\n`
+            `escape routes: ${moveWithBestEscape.escapeRoutes.length}\n`
         ));
         return moveWithBestEscape.move;
     }
