@@ -522,6 +522,15 @@ function calculateMove(board, you) {
     });
 
     if (lastResortMoves.length > 0) {
+        if (safeMoves.length === 0 || safestMoves.length === 0) {
+            const minimaxMove = minimaxAlphaBeta(board, you, myHead, myBody, 3, true, -Infinity, Infinity);
+            if (minimaxMove) {
+                Deno.stdout.writeSync(new TextEncoder().encode(
+                    `[minimax/alphabeta logic | bad situation] ${minimaxMove.move} to (${minimaxMove.nextHead.x},${minimaxMove.nextHead.y})\n`
+                ));
+                return minimaxMove.move;
+            }
+        }
         const move =
             lastResortMoves[Math.floor(Math.random() * lastResortMoves.length)];
         Deno.stdout.writeSync(
@@ -746,4 +755,123 @@ function findEscapeRoutes(board, you, position, blockedPositions) {
     }
 
     return escapeRoutes;
+}
+
+// --- Minimax/AlphaBeta implementation ---
+function minimaxAlphaBeta(board, you, myHead, myBody, depth, maximizing, alpha, beta) {
+    const moves = ["up", "down", "left", "right"];
+    let bestMove = null;
+    let bestValue = maximizing ? -Infinity : Infinity;
+    for (const move of moves) {
+        const nextHead = getNextHeadMinimax(myHead, move);
+        if (!isSafeMinimax(move, nextHead, board, you, myBody)) continue;
+        const willEatFood = board.food && board.food.some((f) => f.x === nextHead.x && f.y === nextHead.y);
+        const simulatedBody = willEatFood ? [nextHead, ...myBody] : [nextHead, ...myBody.slice(0, -1)];
+        const value = minimaxRecursive(board, you, nextHead, simulatedBody, depth - 1, !maximizing, alpha, beta);
+        if (maximizing) {
+            if (value > bestValue) {
+                bestValue = value;
+                bestMove = { move, nextHead };
+            }
+            alpha = Math.max(alpha, bestValue);
+        } else {
+            if (value < bestValue) {
+                bestValue = value;
+                bestMove = { move, nextHead };
+            }
+            beta = Math.min(beta, bestValue);
+        }
+        if (beta <= alpha) break;
+    }
+    return bestMove;
+}
+
+function minimaxRecursive(board, you, myHead, myBody, depth, maximizing, alpha, beta) {
+    if (depth === 0) {
+        return minimaxEval(board, you, myHead, myBody);
+    }
+    const moves = ["up", "down", "left", "right"];
+    let bestValue = maximizing ? -Infinity : Infinity;
+    for (const move of moves) {
+        const nextHead = getNextHeadMinimax(myHead, move);
+        if (!isSafeMinimax(move, nextHead, board, you, myBody)) continue;
+        const willEatFood = board.food && board.food.some((f) => f.x === nextHead.x && f.y === nextHead.y);
+        const simulatedBody = willEatFood ? [nextHead, ...myBody] : [nextHead, ...myBody.slice(0, -1)];
+        const value = minimaxRecursive(board, you, nextHead, simulatedBody, depth - 1, !maximizing, alpha, beta);
+        if (maximizing) {
+            bestValue = Math.max(bestValue, value);
+            alpha = Math.max(alpha, bestValue);
+        } else {
+            bestValue = Math.min(bestValue, value);
+            beta = Math.min(beta, bestValue);
+        }
+        if (beta <= alpha) break;
+    }
+    return bestValue;
+}
+
+function minimaxEval(board, you, myHead, myBody) {
+    // Simple evaluation: maximize available space, penalize proximity to other snake heads
+    const blocked = new Set();
+    for (const snake of board.snakes) {
+        for (const segment of snake.body) {
+            blocked.add(`${segment.x},${segment.y}`);
+        }
+    }
+    const availableSpace = floodFill(myHead, blocked, board, myBody);
+    let minDistToEnemy = Infinity;
+    for (const snake of board.snakes) {
+        if (snake.id === you.id) continue;
+        const dist = Math.abs(myHead.x - snake.head.x) + Math.abs(myHead.y - snake.head.y);
+        if (dist < minDistToEnemy) minDistToEnemy = dist;
+    }
+    return availableSpace * 10 + minDistToEnemy;
+}
+
+function getNextHeadMinimax(myHead, move) {
+    const nextHead = { ...myHead };
+    switch (move) {
+        case "up":
+            nextHead.y++;
+            break;
+        case "down":
+            nextHead.y--;
+            break;
+        case "left":
+            nextHead.x--;
+            break;
+        case "right":
+            nextHead.x++;
+            break;
+    }
+    return nextHead;
+}
+
+function isSafeMinimax(move, nextHead, board, you, myBody) {
+    if (
+        nextHead.x < 0 || nextHead.x >= board.width || nextHead.y < 0 ||
+        nextHead.y >= board.height
+    ) {
+        return false;
+    }
+    const willEatFood = board.food && board.food.some((f) => f.x === nextHead.x && f.y === nextHead.y);
+    const simulatedBody = willEatFood ? myBody : myBody.slice(0, -1);
+    if (
+        simulatedBody.some((segment) =>
+            nextHead.x === segment.x && nextHead.y === segment.y
+        )
+    ) {
+        return false;
+    }
+    for (const snake of board.snakes) {
+        if (snake.id === you.id) continue;
+        if (
+            snake.body.some((segment) =>
+                nextHead.x === segment.x && nextHead.y === segment.y
+            )
+        ) {
+            return false;
+        }
+    }
+    return true;
 }
