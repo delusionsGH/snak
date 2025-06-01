@@ -424,27 +424,45 @@ function calculateMove(board, you) {
         }
     }
     if (closestFood) {
-
+        function isFoodInTrap(foodPos, board, you) {
+            let blocked = 0;
+            for (const dir of [
+                { x: 1, y: 0 },
+                { x: -1, y: 0 },
+                { x: 0, y: 1 },
+                { x: 0, y: -1 }
+            ]) {
+                const nx = foodPos.x + dir.x;
+                const ny = foodPos.y + dir.y;
+                if (nx < 0 || nx >= board.width || ny < 0 || ny >= board.height) {
+                    blocked++;
+                    continue;
+                }
+                if (board.snakes.some(s =>
+                    s.body.some(seg => seg.x === nx && seg.y === ny)
+                )) {
+                    blocked++;
+                }
+            }
+            return blocked >= 3;
+        }
         let enemyGoingForFood = null;
         let enemyWillReachFirst = false;
         let enemyIsLonger = false;
         for (const snake of board.snakes) {
             if (snake.id === you.id) continue;
-
             const enemyHead = snake.head;
             const enemyDist = Math.abs(enemyHead.x - closestFood.x) + Math.abs(enemyHead.y - closestFood.y);
             const myDist = Math.abs(myHead.x - closestFood.x) + Math.abs(myHead.y - closestFood.y);
             if (enemyDist <= myDist) {
-
                 enemyGoingForFood = snake;
                 if (enemyDist < myDist) enemyWillReachFirst = true;
                 if (snake.length >= you.length) enemyIsLonger = true;
             }
         }
-
         if (enemyGoingForFood && (enemyIsLonger || enemyWillReachFirst)) {
             Deno.stdout.writeSync(new TextEncoder().encode(
-                `[food contest] nuh uh, not going to (${closestFood.x},${closestFood.y}), i'm too short right now\n`
+                `[food contest] skipping food at (${closestFood.x},${closestFood.y}), too short\n`
             ));
         } else {
             const path = aStarPath(myHead, closestFood);
@@ -463,7 +481,6 @@ function calculateMove(board, you) {
                     );
                     let foodIsTrap = false;
                     if (willEatFood) {
-
                         const simulatedBody = [nextHead, ...myBody];
                         const blocked = new Set();
                         for (const snake of board.snakes) {
@@ -471,16 +488,12 @@ function calculateMove(board, you) {
                                 blocked.add(`${segment.x},${segment.y}`);
                             }
                         }
-
                         if (myBody.length > 1) {
                             const myTail = myBody[myBody.length - 1];
                             blocked.delete(`${myTail.x},${myTail.y}`);
                         }
                         const availableSpace = floodFill(nextHead, blocked, board, simulatedBody);
-                        const minSafe = myBody.length;
-                        Deno.stdout.writeSync(new TextEncoder().encode(
-                            `[food trap debug] availableSpace=${availableSpace}, minSafe=${minSafe} after eating at (${nextHead.x},${nextHead.y})\n`
-                        ));
+                        const minSafe = Math.max(myBody.length, Math.floor(board.width * board.height / 6));
                         if (availableSpace < minSafe) {
                             foodIsTrap = true;
                         }
@@ -558,7 +571,12 @@ function calculateMove(board, you) {
     }
 
     if (safeMoves.length > 0) {
-        const bestMove = analyzedMoves
+        const nonDoomMoves = analyzedMoves.filter(m => 
+            !wouldTrapInOwnLoop(you, m.nextHead, board)
+        );
+        const bestMoveSet = nonDoomMoves.length > 0 ? nonDoomMoves : analyzedMoves;
+
+        const bestMove = bestMoveSet
             .sort((a, b) => b.availableSpace - a.availableSpace)[0];
         Deno.stdout.writeSync(new TextEncoder().encode(
             `[standard logic | safe with most space] ${bestMove.move} to (${bestMove.nextHead.x},${bestMove.nextHead.y})\n`
@@ -589,8 +607,25 @@ function calculateMove(board, you) {
         return move;
     }
 
-    Deno.stdout.writeSync(new TextEncoder().encode("[uh oh | i'm trapped!] moving down\n"));
-    return "down";
+    if (you.shout && ["up", "down", "left", "right"].includes(you.shout)) {
+        const nextHead = getNextHead(you.shout);
+        if (
+            ["up", "down", "left", "right"].includes(you.shout) &&
+            isSafe(you.shout, nextHead)
+        ) {
+            Deno.stdout.writeSync(new TextEncoder().encode(`[momentum] continuing ${you.shout}\n`));
+            return you.shout;
+        }
+    }
+    const fallbackMoves = ["up", "down", "left", "right"].filter(move => {
+        const nextHead = getNextHead(move);
+        return isSafe(move, nextHead);
+    });
+    const move = fallbackMoves.length > 0
+        ? fallbackMoves[Math.floor(Math.random() * fallbackMoves.length)]
+        : "down";
+    Deno.stdout.writeSync(new TextEncoder().encode("[uh oh | i'm trapped!] letting momentum take hold\n"));
+    return move;
 }
 
 /* function visualizeBoard(board, you, path = []) {
@@ -933,4 +968,43 @@ function isSafeMinimax(move, nextHead, board, you, myBody) {
         }
     }
     return true;
+}
+
+
+function wouldTrapInOwnLoop(you, nextHead, board) {
+    const willEatFood = board.food && board.food.some((f) =>
+        f.x === nextHead.x && f.y === nextHead.y
+    );
+    const simulatedBody = willEatFood ? [nextHead, ...you.body] : [nextHead, ...you.body.slice(0, -1)];
+    let surrounded = 0;
+    for (const dir of [
+        { x: 1, y: 0 },
+        { x: -1, y: 0 },
+        { x: 0, y: 1 },
+        { x: 0, y: -1 }
+    ]) {
+        const nx = nextHead.x + dir.x;
+        const ny = nextHead.y + dir.y;
+        if (nx < 0 || nx >= board.width || ny < 0 || ny >= board.height) {
+            surrounded++;
+            continue;
+        }
+        if (simulatedBody.slice(1).some(seg => seg.x === nx && seg.y === ny)) {
+            surrounded++;
+        }
+    }
+    if (surrounded === 4) return true;
+    const blocked = new Set(simulatedBody.map(seg => `${seg.x},${seg.y}`));
+    for (let x = -1; x <= board.width; x++) {
+        blocked.add(`${x},-1`);
+        blocked.add(`${x},${board.height}`);
+    }
+    for (let y = -1; y <= board.height; y++) {
+        blocked.add(`-1,${y}`);
+        blocked.add(`${board.width},${y}`);
+    }
+    const space = floodFill(nextHead, blocked, board, simulatedBody);
+    if (space < you.length) return true;
+
+    return false;
 }
